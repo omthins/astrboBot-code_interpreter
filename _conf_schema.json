@@ -1,0 +1,81 @@
+{
+  "timeout": {
+    "description": "代码执行超时时间（秒）",
+    "type": "int",
+    "default": 30,
+    "hint": "超过此时间将强制终止执行"
+  },
+  "max_output_length": {
+    "description": "最大输出长度",
+    "type": "int",
+    "default": 5000,
+    "hint": "超过此长度将截断输出"
+  },
+  "enable_network": {
+    "description": "允许代码访问网络",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后代码可以发送网络请求"
+  },
+  "allowed_libraries": {
+    "description": "允许使用的库",
+    "type": "list",
+    "default": ["numpy", "pandas", "matplotlib", "pillow", "requests", "json", "math", "random", "datetime", "re", "collections", "itertools"],
+    "hint": "只有在此列表中的库才能被导入"
+  },
+  "visualization": {
+    "description": "结果可视化设置",
+    "type": "object",
+    "hint": "配置不同类型结果的展示方式",
+    "items": {
+      "enable_table_markdown": {
+        "description": "数据表转Markdown表格",
+        "type": "bool",
+        "default": true,
+        "hint": "将DataFrame等数据表转为Markdown表格显示"
+      },
+      "enable_image_display": {
+        "description": "图像直接显示",
+        "type": "bool",
+        "default": true,
+        "hint": "自动检测并显示生成的图片"
+      },
+      "enable_json_format": {
+        "description": "字典/列表JSON格式化",
+        "type": "bool",
+        "default": true,
+        "hint": "将字典和列表格式化为JSON显示"
+      },
+      "enable_code_render": {
+        "description": "代码渲染为图片",
+        "type": "bool",
+        "default": true,
+        "hint": "将代码和输出渲染为图片发送"
+      }
+    }
+  },
+  "auto_retry": {
+    "description": "代码执行失败时自动重试",
+    "type": "bool",
+    "default": true,
+    "hint": "当代码有错误时，将错误信息反馈给LLM重新生成"
+  },
+  "max_retry_count": {
+    "description": "最大重试次数",
+    "type": "int",
+    "default": 2,
+    "hint": "代码执行失败时的最大重试次数"
+  },
+  "show_execution_time": {
+    "description": "显示执行时间",
+    "type": "bool",
+    "default": true,
+    "hint": "在结果中显示代码执行耗时"
+  },
+  "work_dir": {
+    "description": "代码执行工作目录",
+    "type": "string",
+    "default": "",
+    "hint": "留空则使用系统临时目录"
+  }
+}

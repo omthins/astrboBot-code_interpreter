@@ -1,0 +1,5 @@
+name: astrbot_plugin_code_interpreter
+version: 1.0.6
+author: Your Name
+description: 一个代码解释器插件，支持LLM生成并执行Python代码，支持结果可视化
+repo: https://github.com/your-repo/astrbot_plugin_code_interpreter

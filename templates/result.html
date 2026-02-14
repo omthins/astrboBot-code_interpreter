@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>执行结果</title>
+    <style>
+        /* WinUI 3 Design Tokens (Dark Mode) */
+        :root {
+            /* Backgrounds */
+            --layer-fill: #202020;
+            --layer-fill-acrylic: rgba(32, 32, 32, 0.95);
+            --card-bg: #2b2b2b;
+            --card-bg-secondary: #323232;
+            --code-bg: #1e1e1e;
+            
+            /* Borders */
+            --surface-stroke: rgba(255, 255, 255, 0.08);
+            --divider-stroke: rgba(255, 255, 255, 0.08);
+            --focus-stroke: rgba(255, 255, 255, 0.5);
+            
+            /* Text */
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.786);
+            --text-tertiary: rgba(255, 255, 255, 0.545);
+            
+            /* Accents (System Accent Color - Cyan/Blue) */
+            --accent-default: #60cdff;
+            --accent-tertiary: rgba(96, 205, 255, 0.3);
+            
+            /* State Colors */
+            --success-bg: rgba(16, 124, 16, 0.2);
+            --success-text: #6ccb5f;
+            --error-bg: rgba(197, 15, 31, 0.2);
+            --error-text: #ff99a4;
+            
+            /* Spacing & Radius */
+            --radius-window: 8px;
+            --radius-control: 4px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background-color: #000000; /* Desktop background */
+            color: var(--text-primary);
+            padding: 24px;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            /* 模拟 Mica 背景纹理 */
+            background-image: radial-gradient(circle at 50% 0%, #1a1a2e 0%, #000000 100%);
+        }
+        
+        /* WinUI 窗口容器 */
+        .container {
+            background-color: var(--layer-fill);
+            border: 1px solid var(--surface-stroke);
+            border-radius: var(--radius-window);
+            width: 100%;
+            max-width: 900px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.33); /* Depth Shadow */
+            backdrop-filter: blur(20px); /* Acrylic simulation */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* 标题栏 */
+        .header {
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid var(--divider-stroke);
+            background-color: var(--layer-fill-acrylic);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .header-icon {
+            font-size: 18px;
+            filter: grayscale(100%) brightness(150%);
+        }
+        
+        .header-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .execution-time {
+            margin-left: auto;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+            color: var(--text-secondary);
+            background: var(--card-bg-secondary);
+            padding: 4px 12px;
+            border-radius: var(--radius-control);
+            border: 1px solid var(--surface-stroke);
+        }
+        
+        /* 内容区块 */
+        .section {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--divider-stroke);
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        /* 代码块 - 类似 Windows Terminal */
+        .code-block {
+            background-color: var(--code-bg);
+            border: 1px solid var(--surface-stroke);
+            border-radius: var(--radius-control);
+            padding: 16px;
+            overflow-x: auto;
+            font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #d4d4d4;
+        }
+        
+        /* 自定义滚动条 - Fluent Style */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 5px;
+            border: 2px solid var(--layer-fill); /* Create padding effect */
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #777;
+        }
+        
+        /* 输出区域 */
+        .output-block {
+            background-color: var(--code-bg);
+            border: 1px solid var(--surface-stroke);
+            border-radius: var(--radius-control);
+            padding: 16px;
+            font-family: 'Cascadia Code', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+        }
+        
+        .output-block.error {
+            border-left: 3px solid #ff99a4;
+            background: rgba(197, 15, 31, 0.05);
+        }
+        
+        /* 状态标签 - InfoBar Style */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 10px;
+            border-radius: var(--radius-control);
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: auto;
+        }
+        
+        .status-badge.success {
+            background-color: var(--success-bg);
+            color: var(--success-text);
+        }
+        
+        .status-badge.error {
+            background-color: var(--error-bg);
+            color: var(--error-text);
+        }
+        
+        /* 表格 - Fluent DataGrid Style */
+        .markdown-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13px;
+            border: 1px solid var(--surface-stroke);
+            border-radius: var(--radius-control);
+            overflow: hidden;
+        }
+        
+        .markdown-table th {
+            background-color: var(--card-bg-secondary);
+            color: var(--text-primary);
+            font-weight: 600;
+            padding: 10px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--surface-stroke);
+        }
+        
+        .markdown-table td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--surface-stroke);
+            color: var(--text-secondary);
+            background-color: var(--card-bg);
+        }
+        
+        .markdown-table tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .markdown-table tr:hover td {
+            background-color: var(--card-bg-secondary);
+        }
+        
+        /* JSON 语法高亮 */
+        .json-key { color: #9cdcfe; }     /* VS Code Blue */
+        .json-string { color: #ce9178; }  /* VS Code Orange */
+        .json-number { color: #b5cea8; }  /* VS Code Green */
+        .json-boolean { color: #569cd6; } /* VS Code Dark Blue */
+        .json-null { color: #569cd6; }
+        
+        /* 图片容器 */
+        .image-container {
+            background-color: var(--card-bg);
+            border: 1px solid var(--surface-stroke);
+            border-radius: var(--radius-control);
+            padding: 12px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        
+        .image-container img {
+            max-width: 100%;
+            border-radius: var(--radius-control);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .image-label {
+            margin-top: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-family: 'Cascadia Code', monospace;
+        }
+        
+        /* 代码高亮色板 (VS Code Dark Default) */
+        .keyword { color: #569cd6; }
+        .string { color: #ce9178; }
+        .number { color: #b5cea8; }
+        .comment { color: #6a9955; }
+        .function { color: #dcdcaa; }
+        .class-name { color: #4ec9b0; }
+        
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <span class="header-icon">⚡</span>
+            <span class="header-title">代码解释器</span>
+            {% if execution_time %}
+            <span class="execution-time">{{ execution_time }}s</span>
+            {% endif %}
+        </div>
+        
+        <!-- Code Section -->
+        {% if show_code and code %}
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">执行的代码</span>
+            </div>
+            <div class="code-block">
+                <pre>{{ code }}</pre>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Output Section -->
+        {% if show_output and output %}
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">标准输出</span>
+                {% if status %}
+                <span class="status-badge {{ status }}">{{ status_text }}</span>
+                {% endif %}
+            </div>
+            <div class="output-block {{ status }}">
+                <pre>{{ output }}</pre>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Table Section -->
+        {% if show_table and table_html %}
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">数据表格</span>
+            </div>
+            <div style="overflow-x: auto;">
+                {{ table_html }}
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- JSON Section -->
+        {% if show_json and json_output %}
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">JSON Data</span>
+            </div>
+            <div class="code-block">
+                <pre>{{ json_output }}</pre>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Image Section -->
+        {% if images %}
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">生成的媒体 ({{ images|length }})</span>
+            </div>
+            {% for image in images %}
+            <div class="image-container">
+                <img src="{{ image }}" alt="生成的图片">
+                <div class="image-label">{{ image }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
