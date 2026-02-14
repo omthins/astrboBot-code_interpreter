@@ -93,7 +93,7 @@ CODE_TOOL_DESCRIPTION = """当用户的问题需要以下能力时，使用此�
     "code_interpreter",
     "Your Name",
     "一个代码解释器插件，支持LLM生成并执行Python代码",
-    "1.0.7",
+    "1.0.8",
     "https://github.com/your-repo/astrbot_plugin_code_interpreter"
 )
 class CodeInterpreterPlugin(Star):
@@ -464,17 +464,19 @@ class CodeInterpreterPlugin(Star):
             session_id = event.unified_msg_origin
             executor = self._get_executor(session_id)
             
-            # 执行代码
-            result = executor.execute(code)
+            # 执行代码（支持重试）
+            result, final_code, retry_count = await self._execute_with_retry(
+                event, executor, code
+            )
             
-            logger.info(f"[CodeInterpreter] 执行完成: success={result.success}, time={result.execution_time:.2f}s")
+            logger.info(f"[CodeInterpreter] 执行完成: success={result.success}, time={result.execution_time:.2f}s, retries={retry_count}")
             if result.generated_images:
                 logger.info(f"[CodeInterpreter] 生成图片: {result.generated_images}")
             if result.generated_files:
                 logger.info(f"[CodeInterpreter] 生成文件: {result.generated_files}")
             
             # 格式化输出
-            formatted_data = self._format_output(result, code)
+            formatted_data = self._format_output(result, final_code)
             
             # 构建响应消息链
             message_chain = []
@@ -497,20 +499,23 @@ class CodeInterpreterPlugin(Star):
                         logger.error(f"[CodeInterpreter] 发送图片失败: {img_err}")
                         message_chain.append(Plain(f"[图片: {Path(img_path).name}]"))
             
-            # 如果启用代码渲染且没有图片，生成结果图片
-            if self.enable_code_render and not result.generated_images:
-                image_url = await self._render_result_image(event, code, result, formatted_data)
-                if image_url:
-                    message_chain.append(Image.fromURL(image_url))
-            
-            # 添加文本结果（如果没有渲染图片或执行失败）
-            if not self.enable_code_render or result.generated_images or not result.success:
-                if result.success:
-                    output_text = formatted_data.get("json_data") or formatted_data.get("raw_output", "")
-                    if output_text:
-                        message_chain.append(Plain(f"\n📤 执行结果:\n{output_text}"))
-                else:
-                    message_chain.append(Plain(f"\n❌ 执行失败:\n{result.stderr}"))
+            # 添加文本结果
+            if result.success:
+                output_text = formatted_data.get("json_data") or formatted_data.get("raw_output", "")
+                if output_text:
+                    if self.show_execution_time:
+                        message_chain.append(Plain(f"\n✅ 执行成功 ({result.execution_time:.2f}s)\n\n{output_text}"))
+                    else:
+                        message_chain.append(Plain(f"\n✅ 执行成功\n\n{output_text}"))
+                # 如果有重试，显示重试次数
+                if retry_count > 0:
+                    message_chain.append(Plain(f"\n🔄 自动修正 {retry_count} 次后成功"))
+            else:
+                # 执行失败，显示友好提示
+                error_msg = result.stderr
+                if retry_count >= self.max_retry_count:
+                    error_msg = f"已尝试修正 {retry_count} 次，仍然失败。\n\n错误信息:\n{result.stderr}"
+                message_chain.append(Plain(f"\n❌ 代码执行失败\n\n{error_msg}"))
             
             # 发送结果
             if message_chain:
@@ -524,6 +529,145 @@ class CodeInterpreterPlugin(Star):
             logger.error(traceback.format_exc())
             # 发生错误时不阻止正常响应
             return
+
+    async def _execute_with_retry(
+        self,
+        event: AstrMessageEvent,
+        executor: CodeExecutor,
+        initial_code: str
+    ) -> tuple:
+        """
+        执行代码并支持自动重试
+        返回: (最终执行结果, 最终代码, 重试次数)
+        """
+        code = initial_code
+        retry_count = 0
+        last_error = ""
+        
+        while True:
+            # 执行代码
+            result = executor.execute(code)
+            
+            # 如果成功，直接返回
+            if result.success:
+                return result, code, retry_count
+            
+            # 如果禁用自动重试或已达到最大重试次数，返回失败结果
+            if not self.auto_retry or retry_count >= self.max_retry_count:
+                return result, code, retry_count
+            
+            # 记录错误
+            last_error = result.stderr
+            logger.info(f"[CodeInterpreter] 代码执行失败，尝试让LLM修正 (第 {retry_count + 1} 次重试)")
+            
+            # 尝试让 LLM 修正代码
+            retry_count += 1
+            fixed_code = await self._get_fixed_code(event, code, last_error, retry_count)
+            
+            if fixed_code and fixed_code != code:
+                code = fixed_code
+                logger.info(f"[CodeInterpreter] 获取到修正后的代码，重新执行")
+            else:
+                # 无法获取修正代码，返回失败结果
+                logger.warning("[CodeInterpreter] 未能获取修正后的代码")
+                return result, code, retry_count
+
+    async def _get_fixed_code(
+        self,
+        event: AstrMessageEvent,
+        original_code: str,
+        error_message: str,
+        retry_count: int
+    ) -> Optional[str]:
+        """
+        让 LLM 修正错误的代码
+        """
+        try:
+            # 构建修正请求
+            fix_prompt = f"""你的代码执行失败了，请根据错误信息修正代码。
+
+原始代码:
+```python
+{original_code}
+```
+
+错误信息:
+{error_message}
+
+请直接输出修正后的完整代码，用 ```python ``` 包裹。不要解释，只输出修正后的代码。"""
+
+            # 尝试通过 context 调用 LLM
+            if hasattr(self, 'context') and hasattr(self.context, 'call_llm'):
+                response = await self.context.call_llm(fix_prompt)
+                if response:
+                    fixed_code = self._extract_code(response)
+                    if fixed_code:
+                        return fixed_code
+            
+            # 尝试通过 llm_tool 方式
+            if hasattr(event, 'request_llm'):
+                response = await event.request_llm(fix_prompt)
+                if response:
+                    fixed_code = self._extract_code(str(response))
+                    if fixed_code:
+                        return fixed_code
+            
+            # 尝试通过 _llm_manager 调用
+            if hasattr(self.context, '_llm_manager') and self.context._llm_manager:
+                llm_manager = self.context._llm_manager
+                if hasattr(llm_manager, 'call'):
+                    response = await llm_manager.call(fix_prompt)
+                    if response:
+                        fixed_code = self._extract_code(str(response))
+                        if fixed_code:
+                            return fixed_code
+            
+            # 如果以上方法都不可用，尝试简单的代码自动修复
+            return self._auto_fix_code(original_code, error_message)
+            
+        except Exception as e:
+            logger.error(f"[CodeInterpreter] 获取修正代码失败: {e}")
+            return None
+
+    def _auto_fix_code(self, code: str, error_message: str) -> Optional[str]:
+        """
+        尝试自动修复常见的代码错误
+        """
+        # 修复语法错误：invalid decimal literal
+        if "invalid decimal literal" in error_message:
+            # 尝试修复数字和字符串连写的问题，如 print("结果"5) -> print("结果", 5)
+            import re as regex
+            # 查找类似 "text"数字 的模式
+            code = regex.sub(r'"([^"]*)"(\d+)', r'"\1", \2', code)
+            code = regex.sub(r"'([^']*)'(\d+)", r"'\1', \2", code)
+            code = regex.sub(r'(\d+)"([^"]*)"', r'\1, "\2"', code)
+            code = regex.sub(r"(\d+)'([^']*)'", r"\1, '\2'", code)
+            return code
+        
+        # 修复未闭合的括号
+        if "unterminated string literal" in error_message or "EOL while scanning string literal" in error_message:
+            # 统计引号数量
+            single_quotes = code.count("'") - code.count("\\'")
+            double_quotes = code.count('"') - code.count('\\"')
+            if single_quotes % 2 != 0:
+                code += "'"
+            if double_quotes % 2 != 0:
+                code += '"'
+            return code
+        
+        # 修复缩进错误
+        if "unindent does not match" in error_message or "expected an indented block" in error_message:
+            lines = code.split('\n')
+            fixed_lines = []
+            for line in lines:
+                if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
+                    # 可能需要缩进的行
+                    if any(kw in line for kw in ['print', 'return', 'yield', 'break', 'continue', 'pass']):
+                        line = '    ' + line
+                fixed_lines.append(line)
+            return '\n'.join(fixed_lines)
+        
+        return None
 
     async def terminate(self):
         """插件卸载时清理资源"""

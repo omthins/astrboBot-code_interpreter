@@ -4,6 +4,12 @@
 
 ## 版本历史
 
+### v1.0.8
+- 添加智能重试机制：代码执行失败时自动让 LLM 修正代码
+- 添加常见错误的自动修复功能（语法错误、引号问题、缩进问题）
+- 优化消息发送逻辑：直接发送文本和图片，不再渲染成预览图
+- 改进错误提示：显示重试次数和友好的错误信息
+
 ### v1.0.7
 - 大幅扩展允许的库列表
 - 新增标准库：csv, hashlib, base64, secrets, statistics, decimal, fractions, functools, pathlib, time, calendar, io, sqlite3, typing, xml.etree.ElementTree, urllib.parse
