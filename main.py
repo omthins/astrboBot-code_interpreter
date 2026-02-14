@@ -154,7 +154,7 @@ CODE_TOOL_DESCRIPTION = """当用户的问题需要以下能力时，使用此�
     "code_interpreter",
     "Your Name",
     "一个代码解释器插件，支持LLM生成并执行Python代码",
-    "1.1.1",
+    "1.2.0",
     "https://github.com/your-repo/astrbot_plugin_code_interpreter"
 )
 class CodeInterpreterPlugin(Star):
@@ -348,6 +348,71 @@ class CodeInterpreterPlugin(Star):
         except Exception as e:
             logger.error(f"渲染结果图片失败: {e}")
             return None
+
+    @filter.llm_tool(name="web_search")
+    async def web_search(self, event: AstrMessageEvent, query: str) -> MessageEventResult:
+        """在网络上搜索信息并返回结果。
+        
+        当你需要获取最新的信息、新闻、数据或实时内容时使用此工具。
+        
+        Args:
+            query(string): 搜索关键词或问题
+        """
+        import urllib.parse
+        import urllib.request
+        import json as json_module
+        
+        logger.info(f"[CodeInterpreter] 执行网络搜索: {query}")
+        
+        try:
+            # 使用 DuckDuckGo Instant Answer API（免费，无需 API key）
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&skip_disambig=1"
+            
+            request = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = json_module.loads(response.read().decode('utf-8'))
+            
+            results = []
+            
+            # 提取摘要
+            if data.get('Abstract'):
+                results.append(f"📖 摘要:\n{data['Abstract']}")
+                if data.get('AbstractURL'):
+                    results.append(f"🔗 来源: {data['AbstractURL']}")
+            
+            # 提取相关主题
+            if data.get('RelatedTopics'):
+                topics = []
+                for topic in data['RelatedTopics'][:5]:
+                    if isinstance(topic, dict) and topic.get('Text'):
+                        topics.append(f"• {topic['Text']}")
+                if topics:
+                    results.append(f"\n📚 相关信息:\n" + "\n".join(topics))
+            
+            # 提取定义
+            if data.get('Definition'):
+                results.append(f"\n📝 定义:\n{data['Definition']}")
+            
+            # 提取答案
+            if data.get('Answer'):
+                results.append(f"\n💡 答案:\n{data['Answer']}")
+            
+            if results:
+                result_text = f"🔍 搜索结果: {query}\n\n" + "\n".join(results)
+            else:
+                # 如果 DuckDuckGo 没有返回结果，尝试提供搜索链接
+                search_url = f"https://duckduckgo.com/?q={encoded_query}"
+                result_text = f"🔍 未找到直接结果，请访问:\n{search_url}"
+            
+            yield event.plain_result(result_text)
+            
+        except Exception as e:
+            logger.error(f"[CodeInterpreter] 网络搜索失败: {e}")
+            yield event.plain_result(f"❌ 网络搜索失败: {str(e)}")
 
     @filter.llm_tool(name="execute_python_code")
     async def execute_python_code(self, event: AstrMessageEvent, code: str) -> MessageEventResult:
