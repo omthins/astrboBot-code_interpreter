@@ -33,33 +33,114 @@ class ExecutionResult:
 
 class CodeValidator:
     """代码验证器，检查代码安全性"""
-    
+
+    # 危险函数黑名单
     DANGEROUS_FUNCTIONS = {
-        'eval', 'exec', 'compile', 'input',
-        '__import__', 'globals', 'locals', 'vars',
-        'os.system', 'os.popen', 'os.spawn', 'os.exec',
-        'subprocess.call', 'subprocess.run', 'subprocess.Popen',
+        # 动态执行
+        'eval', 'exec', 'compile', 'execfile',
+        # 动态导入
+        '__import__',
+        # 内省危险函数
+        'globals', 'locals', 'vars', 'dir',
+        # 系统交互
+        'system', 'popen', 'spawn', 'exec', 'fork',
+        # 输入
+        'input', 'raw_input',
     }
-    
+
+    # 危险模块黑名单
     DANGEROUS_MODULES = {
-        'os', 'subprocess', 'socket', 'pickle',
-        'shutil', 'importlib', 'ctypes', 'multiprocessing',
-        'threading', 'signal', 'pty', 'fcntl', 'pipes',
+        # 系统交互
+        'os', 'subprocess', 'commands', 'popen2',
+        # 网络
+        'socket', 'ssl', 'asyncore', 'asynchat',
+        # 进程/线程
+        'multiprocessing', 'threading', '_thread',
+        # 动态加载
+        'importlib', 'imp', 'pkgutil',
+        # 底层操作
+        'ctypes', '_ctypes', 'cffi',
+        # 序列化（可能执行任意代码）
+        'pickle', 'cPickle', 'marshal', 'shelve',
+        # 文件系统危险操作
+        'shutil',
+        # 信号
+        'signal', 'posix',
+        # 系统信息
+        'sys', 'platform',
+        # 其他危险模块
+        'pty', 'fcntl', 'pipes', 'posixpath',
     }
-    
+
+    # 危险属性（反射攻击）
+    DANGEROUS_ATTRIBUTES = {
+        '__class__', '__bases__', '__subclasses__', '__mro__',
+        '__globals__', '__code__', '__builtins__', '__dict__',
+        '__getattribute__', '__setattr__', '__delattr__',
+        '__reduce__', '__reduce_ex__', '__import__',
+    }
+
+    # 恶意代码模式（字符串模式检测）
+    MALICIOUS_PATTERNS = [
+        r'__import__\s*\(',
+        r'eval\s*\(',
+        r'exec\s*\(',
+        r'compile\s*\(',
+        r'__class__',
+        r'__bases__',
+        r'__subclasses__',
+        r'__globals__',
+        r'__builtins__',
+        r'getattr\s*\([^,]+,\s*[\'\"]__',
+        r'setattr\s*\([^,]+,\s*[\'\"]__',
+        r'open\s*\([\'\"]\/etc\/',
+        r'open\s*\([\'\"]C:\\\\Windows',
+        r'subprocess\.',
+        r'os\.system',
+        r'os\.popen',
+        r'shutil\.rmtree',
+        r'rm\s+-rf',
+        r'del\s+/s',
+        r'format\s+c:',
+        r'mkfs',
+        r'dd\s+if=',
+    ]
+
     def __init__(self, allowed_libraries: List[str]):
         self.allowed_libraries = set(lib.lower() for lib in allowed_libraries)
-    
+
     def validate(self, code: str) -> Tuple[bool, str]:
         """
         验证代码安全性
         返回: (是否安全, 错误信息)
         """
+        # 1. 字符串模式检测（先于 AST 解析，可以检测注释中的恶意意图）
+        pattern_error = self._check_malicious_patterns(code)
+        if pattern_error:
+            return False, pattern_error
+
+        # 2. AST 语法检查
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
             return False, f"语法错误: {e}"
-        
+
+        # 3. AST 节点检查
+        ast_error = self._check_ast_nodes(tree)
+        if ast_error:
+            return False, ast_error
+
+        return True, ""
+
+    def _check_malicious_patterns(self, code: str) -> Optional[str]:
+        """检查恶意代码模式"""
+        for pattern in self.MALICIOUS_PATTERNS:
+            if re.search(pattern, code, re.IGNORECASE):
+                return f"检测到可疑代码模式，禁止执行"
+        return None
+
+    def _check_ast_nodes(self, tree: ast.AST) -> Optional[str]:
+        """检查 AST 节点"""
         for node in ast.walk(tree):
             # 检查导入语句
             if isinstance(node, ast.Import):
@@ -67,27 +148,43 @@ class CodeValidator:
                     module_name = alias.name.split('.')[0].lower()
                     if module_name in self.DANGEROUS_MODULES:
                         if module_name not in self.allowed_libraries:
-                            return False, f"禁止导入模块: {alias.name}"
+                            return f"禁止导入危险模块: {alias.name}"
                     elif module_name not in self.allowed_libraries:
-                        return False, f"不允许导入模块: {alias.name}。允许的模块: {', '.join(self.allowed_libraries)}"
-            
+                        return f"不允许导入模块: {alias.name}"
+
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     module_name = node.module.split('.')[0].lower()
                     if module_name in self.DANGEROUS_MODULES:
                         if module_name not in self.allowed_libraries:
-                            return False, f"禁止从模块导入: {node.module}"
+                            return f"禁止从危险模块导入: {node.module}"
                     elif module_name not in self.allowed_libraries:
-                        return False, f"不允许从模块导入: {node.module}。允许的模块: {', '.join(self.allowed_libraries)}"
-            
+                        return f"不允许从模块导入: {node.module}"
+
             # 检查函数调用
             if isinstance(node, ast.Call):
                 func_name = self._get_func_name(node.func)
-                if func_name and func_name in self.DANGEROUS_FUNCTIONS:
-                    return False, f"禁止使用函数: {func_name}"
-        
-        return True, ""
-    
+                if func_name:
+                    # 检查危险函数
+                    func_base = func_name.split('.')[-1]
+                    if func_base in self.DANGEROUS_FUNCTIONS:
+                        return f"禁止使用危险函数: {func_name}"
+                    # 检查完整路径
+                    if func_name in self.DANGEROUS_FUNCTIONS:
+                        return f"禁止使用危险函数: {func_name}"
+
+            # 检查属性访问
+            if isinstance(node, ast.Attribute):
+                if node.attr in self.DANGEROUS_ATTRIBUTES:
+                    return f"禁止访问危险属性: {node.attr}"
+
+            # 检查名称引用
+            if isinstance(node, ast.Name):
+                if node.id in self.DANGEROUS_ATTRIBUTES:
+                    return f"禁止访问危险属性: {node.id}"
+
+        return None
+
     def _get_func_name(self, node) -> Optional[str]:
         """获取函数名"""
         if isinstance(node, ast.Name):
