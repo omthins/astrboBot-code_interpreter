@@ -65,6 +65,33 @@ CODE_INTERPRETER_SYSTEM_PROMPT = """你是一个专业的代码解释器助手�
 6. 代码不要包含 input() 函数
 7. 所有输出通过 print() 输出
 
+## 🖼️ 图表中文显示（非常重要）
+**如果图表需要显示中文（标题、标签、图例等），必须在绑图代码开头添加以下配置：**
+```python
+import matplotlib.pyplot as plt
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi', 'FangSong']
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+```
+**不添加上述配置会导致中文显示为方框（□□□）！**
+
+示例：
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+# 设置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+x = np.linspace(0, 10, 100)
+plt.plot(x, np.sin(x))
+plt.title('正弦函数图像')  # 中文标题
+plt.xlabel('x轴')
+plt.ylabel('y轴')
+plt.savefig('sin.png')
+print('图像已保存')
+```
+
 ## 可用库：
 - numpy: 数值计算
 - pandas: 数据处理和分析
@@ -100,8 +127,13 @@ CODE_INTERPRETER_SYSTEM_PROMPT = """你是一个专业的代码解释器助手�
 import matplotlib.pyplot as plt
 import numpy as np
 
+# 设置中文字体（绑图时必须添加）
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False
+
 x = np.linspace(0, 10, 100)
 plt.plot(x, np.sin(x))
+plt.title('正弦函数图像')
 plt.savefig('sin.png')  # 文件会保存到 D:\\BotCode\\sin.png
 print('图像已保存')
 ```"""
@@ -122,7 +154,7 @@ CODE_TOOL_DESCRIPTION = """当用户的问题需要以下能力时，使用此�
     "code_interpreter",
     "Your Name",
     "一个代码解释器插件，支持LLM生成并执行Python代码",
-    "1.1.0",
+    "1.1.1",
     "https://github.com/your-repo/astrbot_plugin_code_interpreter"
 )
 class CodeInterpreterPlugin(Star):
