@@ -204,13 +204,11 @@ class CodeExecutor:
         self,
         timeout: int = 30,
         max_output_length: int = 5000,
-        enable_network: bool = False,
         allowed_libraries: List[str] = None,
         work_dir: str = None,
     ):
         self.timeout = timeout
         self.max_output_length = max_output_length
-        self.enable_network = enable_network
         self.allowed_libraries = allowed_libraries or []
         self.validator = CodeValidator(self.allowed_libraries)
         
@@ -388,17 +386,7 @@ print(json.dumps(_result, ensure_ascii=False))
     
     def _prepare_env(self) -> dict:
         """准备环境变量"""
-        env = os.environ.copy()
-        
-        # 如果禁用网络，移除相关环境变量
-        if not self.enable_network:
-            # 这些只是象征性的限制，实际网络限制需要更复杂的沙箱
-            env.pop('HTTP_PROXY', None)
-            env.pop('HTTPS_PROXY', None)
-            env.pop('http_proxy', None)
-            env.pop('https_proxy', None)
-        
-        return env
+        return os.environ.copy()
     
     def cleanup(self):
         """清理工作目录"""

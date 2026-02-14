@@ -122,7 +122,7 @@ CODE_TOOL_DESCRIPTION = """当用户的问题需要以下能力时，使用此�
     "code_interpreter",
     "Your Name",
     "一个代码解释器插件，支持LLM生成并执行Python代码",
-    "1.0.9",
+    "1.1.0",
     "https://github.com/your-repo/astrbot_plugin_code_interpreter"
 )
 class CodeInterpreterPlugin(Star):
@@ -135,7 +135,6 @@ class CodeInterpreterPlugin(Star):
         # 初始化配置
         self.timeout = config.get("timeout", 30)
         self.max_output_length = config.get("max_output_length", 5000)
-        self.enable_network = config.get("enable_network", False)
         self.allowed_libraries = config.get("allowed_libraries", [
             "numpy", "pandas", "matplotlib", "pillow", "requests",
             "json", "math", "random", "datetime", "re", "collections", "itertools",
@@ -186,7 +185,6 @@ class CodeInterpreterPlugin(Star):
             self._executors[safe_session_id] = CodeExecutor(
                 timeout=self.timeout,
                 max_output_length=self.max_output_length,
-                enable_network=self.enable_network,
                 allowed_libraries=self.allowed_libraries,
                 work_dir=str(work_dir),
             )

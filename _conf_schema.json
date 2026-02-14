@@ -11,12 +11,6 @@
     "default": 5000,
     "hint": "超过此长度将截断输出"
   },
-  "enable_network": {
-    "description": "允许代码访问网络",
-    "type": "bool",
-    "default": false,
-    "hint": "开启后代码可以发送网络请求"
-  },
   "allowed_libraries": {
     "description": "允许使用的库",
     "type": "list",
