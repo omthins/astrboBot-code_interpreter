@@ -4,6 +4,11 @@
 
 ## 版本历史
 
+### v1.0.7
+- 大幅扩展允许的库列表
+- 新增标准库：csv, hashlib, base64, secrets, statistics, decimal, fractions, functools, pathlib, time, calendar, io, sqlite3, typing, xml.etree.ElementTree, urllib.parse
+- 新增第三方库：qrcode, seaborn, openpyxl, beautifulsoup4, wordcloud, sympy
+
 ### v1.0.6
 - 在系统提示中添加工作目录信息
 - 添加调试日志显示实际工作目录
@@ -108,18 +113,29 @@ D:\BotCode\
 ## 允许的库
 
 默认允许以下库：
-- `numpy` - 数值计算
-- `pandas` - 数据处理和分析
-- `matplotlib` - 绑图
-- `pillow` - 图像处理
-- `requests` - HTTP 请求
-- `json` - JSON 处理
-- `math` - 数学函数
-- `random` - 随机数
-- `datetime` - 日期时间
-- `re` - 正则表达式
-- `collections` - 集合工具
-- `itertools` - 迭代工具
+
+### 核心库（已安装）
+| 库 | 用途 |
+|----|------|
+| `numpy` | 数值计算 |
+| `pandas` | 数据处理和分析 |
+| `matplotlib` | 绑图 |
+| `pillow` | 图像处理 |
+| `seaborn` | 统计图表 |
+| `requests` | HTTP 请求 |
+
+### 新增第三方库（需安装）
+| 库 | 用途 | 安装命令 |
+|----|------|----------|
+| `qrcode` | 二维码生成 | `pip install qrcode[pil]` |
+| `wordcloud` | 词云生成 | `pip install wordcloud` |
+| `sympy` | 符号数学 | `pip install sympy` |
+| `openpyxl` | Excel 读写 | `pip install openpyxl` |
+| `beautifulsoup4` | HTML 解析 | `pip install beautifulsoup4` |
+| `seaborn` | 统计图表 | `pip install seaborn` |
+
+### 标准库（内置）
+`json`, `math`, `statistics`, `decimal`, `fractions`, `random`, `secrets`, `datetime`, `time`, `calendar`, `re`, `csv`, `io`, `pathlib`, `hashlib`, `base64`, `sqlite3`, `urllib.parse`, `collections`, `itertools`, `functools`, `typing`, `xml.etree.ElementTree`
 
 ## 安全性
 

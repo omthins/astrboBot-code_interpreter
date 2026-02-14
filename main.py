@@ -41,13 +41,22 @@ CODE_INTERPRETER_SYSTEM_PROMPT = """你是一个专业的代码解释器助手�
 - pandas: 数据处理和分析
 - matplotlib: 绑图（必须用 savefig 保存图片）
 - pillow: 图像处理
+- seaborn: 统计图表
+- qrcode: 二维码生成
+- wordcloud: 词云生成
+- sympy: 符号数学
+- openpyxl: Excel 读写
+- beautifulsoup4: HTML 解析
 - json: JSON处理
-- math: 数学函数
-- random: 随机数
-- datetime: 日期时间
+- math, statistics, decimal, fractions: 数学计算
+- random, secrets: 随机数
+- datetime, time, calendar: 时间日期
 - re: 正则表达式
-- collections: 集合工具
-- itertools: 迭代工具
+- csv, io, pathlib: 文件操作
+- hashlib, base64: 编码加密
+- sqlite3: 数据库
+- urllib.parse: URL 解析
+- collections, itertools, functools: 工具库
 
 ## 响应格式：
 当需要执行代码时，请使用以下格式包裹代码：
@@ -84,7 +93,7 @@ CODE_TOOL_DESCRIPTION = """当用户的问题需要以下能力时，使用此�
     "code_interpreter",
     "Your Name",
     "一个代码解释器插件，支持LLM生成并执行Python代码",
-    "1.0.3",
+    "1.0.7",
     "https://github.com/your-repo/astrbot_plugin_code_interpreter"
 )
 class CodeInterpreterPlugin(Star):
@@ -99,8 +108,12 @@ class CodeInterpreterPlugin(Star):
         self.max_output_length = config.get("max_output_length", 5000)
         self.enable_network = config.get("enable_network", False)
         self.allowed_libraries = config.get("allowed_libraries", [
-            "numpy", "pandas", "matplotlib", "pillow", "requests", 
-            "json", "math", "random", "datetime", "re", "collections", "itertools"
+            "numpy", "pandas", "matplotlib", "pillow", "requests",
+            "json", "math", "random", "datetime", "re", "collections", "itertools",
+            "csv", "hashlib", "base64", "secrets", "statistics", "decimal", "fractions",
+            "functools", "pathlib", "time", "calendar", "io", "sqlite3", "typing",
+            "xml.etree.ElementTree", "urllib.parse", "qrcode", "seaborn", "openpyxl",
+            "beautifulsoup4", "wordcloud", "sympy"
         ])
         self.auto_retry = config.get("auto_retry", True)
         self.max_retry_count = config.get("max_retry_count", 2)
