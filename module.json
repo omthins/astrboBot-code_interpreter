@@ -1,0 +1,12 @@
+{
+    "description": "代码解释器插件依赖库管理文件",
+    "version": "1.0.0",
+    "lastUpdated": "2026-02-19",
+    "libraries": {},
+    "standardLibraries": [
+        "json", "math", "statistics", "decimal", "fractions", "random", "secrets",
+        "datetime", "time", "calendar", "re", "csv", "io", "pathlib", "hashlib",
+        "base64", "sqlite3", "urllib.parse", "collections", "itertools", "functools",
+        "typing", "xml.etree.ElementTree"
+    ]
+}

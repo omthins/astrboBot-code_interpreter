@@ -1,5 +1,5 @@
 name:   Ai自主解决问题!!!!
-version: 1.3.0
+version: 1.4.0
 author: Eno
-description: 一个代码解释器插件，支持LLM生成并执行Python代码，支持结果可视化
+description: 一个代码解释器插件，支持LLM生成并执行Python代码，支持结果可视化，自动库管理
 repo: https://github.com/your-repo/astrbot_plugin_code_interpreter

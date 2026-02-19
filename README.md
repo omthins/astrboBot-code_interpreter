@@ -5,6 +5,19 @@
 
 ## 版本历史
 
+### v1.4.0
+- **自动化库管理流程**：
+  1. 代码执行前自动检查所需库是否已安装
+  2. 若库不存在，自动执行 pip 安装并**发送提醒消息**
+  3. 安装完成后，将库信息记录到 `module.json` 文件
+  4. 后续执行时先检查 `module.json` 确认库状态
+- **pip镜像源加速**：默认使用清华镜像源，支持切换多个国内镜像
+- **简洁输出**：移除执行成功的时间显示，输出更加简洁
+- 新增 `/lib_status` 命令：查看库安装状态
+- 新增 `/lib_refresh` 命令：刷新库状态缓存
+- 新增 `/pip_mirror` 命令：查看或切换pip镜像源
+- 新增配置项 `auto_install_libraries`：控制是否自动安装缺失的库
+
 ### v1.3.0
 - **双重安全防护机制**：
   1. 静态代码分析检查（AST 解析 + 模式匹配）
@@ -96,6 +109,9 @@
 |------|------|
 | `/code <代码>` | 直接执行 Python 代码 |
 | `/code_help` | 显示帮助信息 |
+| `/lib_status [库名]` | 查看库安装状态（不指定库名则显示全部） |
+| `/lib_refresh` | 刷新库状态缓存 |
+| `/pip_mirror [镜像名]` | 查看或切换pip镜像源 |
 
 ### 自然语言
 
@@ -122,6 +138,56 @@
 | `max_retry_count` | int | 2 | 最大重试次数 |
 | `show_execution_time` | bool | true | 显示执行时间 |
 | `work_dir` | string | "" | 代码执行工作目录（留空使用系统临时目录） |
+| `auto_install_libraries` | bool | true | 自动安装缺失的库 |
+
+## 自动化库管理流程
+
+插件实现了完整的自动化库管理流程：
+
+### 工作流程
+1. **代码分析**：执行代码前，自动提取代码中 `import` 的所有库
+2. **状态检查**：检查 `module.json` 文件，确认库是否已记录为已安装
+3. **实际验证**：通过 Python 的 `importlib` 验证库是否真正可用
+4. **自动安装**：若库未安装且 `auto_install_libraries` 为 `true`，自动执行 `pip install`
+5. **记录更新**：安装成功后，更新 `module.json` 文件记录库信息
+
+### module.json 文件结构
+```json
+{
+    "description": "代码解释器插件依赖库管理文件",
+    "version": "1.0.0",
+    "lastUpdated": "2026-02-19",
+    "libraries": {
+        "numpy": {
+            "installed": true,
+            "version": "1.24.0",
+            "installTime": "2026-02-19 10:30:00",
+            "description": "数值计算"
+        }
+    },
+    "standardLibraries": ["json", "math", "re", ...]
+}
+```
+
+### 库管理命令
+- `/lib_status` - 查看所有库的安装状态
+- `/lib_status numpy` - 查看指定库的详细状态
+- `/lib_refresh` - 刷新库状态缓存，重新检测实际安装情况
+
+### pip镜像源管理
+插件默认使用清华大学镜像源加速下载，支持以下镜像源：
+
+| 镜像源 | 地址 |
+|--------|------|
+| 清华 | https://pypi.tuna.tsinghua.edu.cn/simple |
+| 阿里云 | https://mirrors.aliyun.com/pypi/simple |
+| 腾讯 | https://mirrors.cloud.tencent.com/pypi/simple |
+| 华为 | https://mirrors.huawei.com/pypi/simple |
+| 中科大 | https://pypi.mirrors.ustc.edu.cn/simple/ |
+
+命令用法：
+- `/pip_mirror` - 查看当前镜像源和可用列表
+- `/pip_mirror 阿里云` - 切换到阿里云镜像源
 
 ## 工作目录
 

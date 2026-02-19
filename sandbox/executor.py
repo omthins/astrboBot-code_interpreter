@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import traceback
 
+from .library_manager import LibraryManager
+
 
 @dataclass
 class ExecutionResult:
@@ -29,50 +31,33 @@ class ExecutionResult:
     generated_files: List[str] = field(default_factory=list)
     generated_images: List[str] = field(default_factory=list)
     variables: Dict[str, Any] = field(default_factory=dict)
+    installed_libraries: List[str] = field(default_factory=list)
 
 
 class CodeValidator:
     """代码验证器，检查代码安全性"""
 
-    # 危险函数黑名单
     DANGEROUS_FUNCTIONS = {
-        # 动态执行
         'eval', 'exec', 'compile', 'execfile',
-        # 动态导入
         '__import__',
-        # 内省危险函数
         'globals', 'locals', 'vars', 'dir',
-        # 系统交互
         'system', 'popen', 'spawn', 'exec', 'fork',
-        # 输入
         'input', 'raw_input',
     }
 
-    # 危险模块黑名单
     DANGEROUS_MODULES = {
-        # 系统交互
         'os', 'subprocess', 'commands', 'popen2',
-        # 网络
         'socket', 'ssl', 'asyncore', 'asynchat',
-        # 进程/线程
         'multiprocessing', 'threading', '_thread',
-        # 动态加载
         'importlib', 'imp', 'pkgutil',
-        # 底层操作
         'ctypes', '_ctypes', 'cffi',
-        # 序列化（可能执行任意代码）
         'pickle', 'cPickle', 'marshal', 'shelve',
-        # 文件系统危险操作
         'shutil',
-        # 信号
         'signal', 'posix',
-        # 系统信息
         'sys', 'platform',
-        # 其他危险模块
         'pty', 'fcntl', 'pipes', 'posixpath',
     }
 
-    # 危险属性（反射攻击）
     DANGEROUS_ATTRIBUTES = {
         '__class__', '__bases__', '__subclasses__', '__mro__',
         '__globals__', '__code__', '__builtins__', '__dict__',
@@ -80,7 +65,6 @@ class CodeValidator:
         '__reduce__', '__reduce_ex__', '__import__',
     }
 
-    # 恶意代码模式（字符串模式检测）
     MALICIOUS_PATTERNS = [
         r'__import__\s*\(',
         r'eval\s*\(',
@@ -106,31 +90,62 @@ class CodeValidator:
         r'dd\s+if=',
     ]
 
-    def __init__(self, allowed_libraries: List[str]):
+    def __init__(self, allowed_libraries: List[str], library_manager: LibraryManager = None):
         self.allowed_libraries = set(lib.lower() for lib in allowed_libraries)
+        self.library_manager = library_manager
 
     def validate(self, code: str) -> Tuple[bool, str]:
-        """
-        验证代码安全性
-        返回: (是否安全, 错误信息)
-        """
-        # 1. 字符串模式检测（先于 AST 解析，可以检测注释中的恶意意图）
         pattern_error = self._check_malicious_patterns(code)
         if pattern_error:
             return False, pattern_error
 
-        # 2. AST 语法检查
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
             return False, f"语法错误: {e}"
 
-        # 3. AST 节点检查
         ast_error = self._check_ast_nodes(tree)
         if ast_error:
             return False, ast_error
 
         return True, ""
+
+    def extract_required_libraries(self, code: str) -> List[str]:
+        """从代码中提取所需的库列表"""
+        required = []
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        module_name = alias.name.split('.')[0].lower()
+                        if module_name not in self.DANGEROUS_MODULES:
+                            required.append(module_name)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        module_name = node.module.split('.')[0].lower()
+                        if module_name not in self.DANGEROUS_MODULES:
+                            required.append(module_name)
+        except SyntaxError:
+            pass
+        return list(set(required))
+
+    def ensure_libraries(self, libraries: List[str]) -> Tuple[bool, Dict[str, str]]:
+        """确保所有需要的库都已安装"""
+        if not self.library_manager:
+            return True, {}
+        
+        results = {}
+        all_success = True
+        
+        for lib in libraries:
+            if lib in self.allowed_libraries:
+                success, message = self.library_manager.ensureLibrary(lib)
+                results[lib] = message
+                if not success:
+                    all_success = False
+        
+        return all_success, results
 
     def _check_malicious_patterns(self, code: str) -> Optional[str]:
         """检查恶意代码模式"""
@@ -206,20 +221,26 @@ class CodeExecutor:
         max_output_length: int = 5000,
         allowed_libraries: List[str] = None,
         work_dir: str = None,
+        module_json_path: str = None,
+        auto_install_libraries: bool = True,
     ):
         self.timeout = timeout
         self.max_output_length = max_output_length
         self.allowed_libraries = allowed_libraries or []
-        self.validator = CodeValidator(self.allowed_libraries)
         
-        # 设置工作目录
+        self.library_manager = LibraryManager(
+            moduleJsonPath=module_json_path,
+            autoInstall=auto_install_libraries
+        )
+        
+        self.validator = CodeValidator(self.allowed_libraries, self.library_manager)
+        
         if work_dir:
             self.work_dir = Path(work_dir)
             self.work_dir.mkdir(parents=True, exist_ok=True)
         else:
             self.work_dir = Path(tempfile.mkdtemp(prefix="code_sandbox_"))
         
-        # 打印工作目录用于调试
         print(f"[CodeExecutor] 工作目录: {self.work_dir}")
     
     def execute(self, code: str, session_vars: Dict[str, Any] = None) -> ExecutionResult:
@@ -228,7 +249,6 @@ class CodeExecutor:
         """
         start_time = time.time()
         
-        # 验证代码
         is_valid, error_msg = self.validator.validate(code)
         if not is_valid:
             return ExecutionResult(
@@ -238,10 +258,30 @@ class CodeExecutor:
                 execution_time=0.0
             )
         
-        # 记录执行前的文件
+        required_libs = self.validator.extract_required_libraries(code)
+        
+        installed_libs = []
+        for lib in required_libs:
+            if lib in self.allowed_libraries:
+                was_installed = lib in self.library_manager.config.libraries and self.library_manager.config.libraries[lib].installed
+                success, message = self.library_manager.ensureLibrary(lib)
+                if success and not was_installed:
+                    installed_libs.append(lib)
+        
+        libs_ready, lib_results = self.validator.ensure_libraries(required_libs)
+        
+        if not libs_ready:
+            failed_libs = [lib for lib, msg in lib_results.items() if "失败" in msg or "未安装" in msg]
+            return ExecutionResult(
+                success=False,
+                stdout="",
+                stderr=f"库安装失败: {', '.join(failed_libs)}\n详细信息:\n" + "\n".join([f"  - {k}: {v}" for k, v in lib_results.items()]),
+                execution_time=0.0,
+                installed_libraries=installed_libs
+            )
+        
         files_before = set(self.work_dir.glob("*"))
         
-        # 准备执行脚本
         exec_script = self._prepare_exec_script(code, session_vars)
         script_path = self.work_dir / "_exec_script.py"
         
@@ -249,10 +289,8 @@ class CodeExecutor:
             with open(script_path, 'w', encoding='utf-8') as f:
                 f.write(exec_script)
             
-            # 准备环境变量
             env = self._prepare_env()
             
-            # 执行代码
             result = subprocess.run(
                 [sys.executable, str(script_path)],
                 capture_output=True,
@@ -265,7 +303,6 @@ class CodeExecutor:
             stdout = result.stdout
             stderr = result.stderr
             
-            # 尝试解析JSON输出
             try:
                 if stdout.strip():
                     output_data = json.loads(stdout.strip())
@@ -281,13 +318,11 @@ class CodeExecutor:
                 actual_stderr = stderr
                 success = result.returncode == 0
             
-            # 截断过长输出
             if len(actual_stdout) > self.max_output_length:
                 actual_stdout = actual_stdout[:self.max_output_length] + f"\n... (输出过长，已截断)"
             if len(actual_stderr) > self.max_output_length:
                 actual_stderr = actual_stderr[:self.max_output_length] + f"\n... (错误输出过长，已截断)"
             
-            # 检测生成的文件
             files_after = set(self.work_dir.glob("*"))
             new_files = files_after - files_before - {script_path}
             
@@ -297,7 +332,6 @@ class CodeExecutor:
             for f in new_files:
                 if f.is_file():
                     generated_files.append(str(f))
-                    # 检测图片文件
                     if f.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}:
                         generated_images.append(str(f))
             
@@ -310,6 +344,7 @@ class CodeExecutor:
                 execution_time=execution_time,
                 generated_files=generated_files,
                 generated_images=generated_images,
+                installed_libraries=installed_libs
             )
             
         except subprocess.TimeoutExpired:
@@ -318,6 +353,7 @@ class CodeExecutor:
                 stdout="",
                 stderr=f"执行超时（超过 {self.timeout} 秒）",
                 execution_time=self.timeout,
+                installed_libraries=installed_libs
             )
         except Exception as e:
             return ExecutionResult(
@@ -325,6 +361,7 @@ class CodeExecutor:
                 stdout="",
                 stderr=f"执行错误: {str(e)}\n{traceback.format_exc()}",
                 execution_time=time.time() - start_time,
+                installed_libraries=installed_libs
             )
     
     def _prepare_exec_script(self, code: str, session_vars: Dict[str, Any] = None) -> str:

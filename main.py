@@ -17,6 +17,7 @@ from astrbot.api import AstrBotConfig
 from astrbot.api.message_components import Image, Plain
 
 from .sandbox.executor import CodeExecutor, ExecutionResult
+from .sandbox.library_manager import LibraryManager
 
 
 # 代码解释器工具的系统提示
@@ -183,7 +184,6 @@ class CodeInterpreterPlugin(Star):
         super().__init__(context)
         self.config = config
         
-        # 初始化配置
         self.timeout = config.get("timeout", 30)
         self.max_output_length = config.get("max_output_length", 5000)
         self.allowed_libraries = config.get("allowed_libraries", [
@@ -197,37 +197,38 @@ class CodeInterpreterPlugin(Star):
         self.auto_retry = config.get("auto_retry", True)
         self.max_retry_count = config.get("max_retry_count", 2)
         self.show_execution_time = config.get("show_execution_time", True)
+        self.auto_install_libraries = config.get("auto_install_libraries", True)
         
-        # 工作目录固定为 D:\BotCode，如果不存在则自动创建
         self.work_dir = "D:\\BotCode"
         Path(self.work_dir).mkdir(parents=True, exist_ok=True)
         
-        # 可视化配置
+        self.module_json_path = Path(__file__).parent / "module.json"
+        self.library_manager = LibraryManager(
+            moduleJsonPath=str(self.module_json_path),
+            autoInstall=self.auto_install_libraries
+        )
+        
         viz_config = config.get("visualization", {})
         self.enable_table_markdown = viz_config.get("enable_table_markdown", True)
         self.enable_image_display = viz_config.get("enable_image_display", True)
         self.enable_json_format = viz_config.get("enable_json_format", True)
         self.enable_code_render = viz_config.get("enable_code_render", True)
         
-        # 会话执行器缓存
         self._executors: Dict[str, CodeExecutor] = {}
         
-        # 获取模板路径
         self.template_path = Path(__file__).parent / "templates" / "result.html"
         
         logger.info(f"代码解释器插件已加载，超时时间: {self.timeout}s，工作目录: {self.work_dir}")
+        logger.info(f"库管理器已初始化，module.json: {self.module_json_path}")
 
     def _get_executor(self, session_id: str) -> CodeExecutor:
         """获取或创建会话执行器"""
-        # 清理 session_id 中的无效字符（Windows 不允许 : 在文件名中）
         safe_session_id = session_id.replace(":", "_").replace("/", "_").replace("\\", "_")
         
         if safe_session_id not in self._executors:
-            # 确保工作目录存在
             base_work_dir = Path(self.work_dir)
             base_work_dir.mkdir(parents=True, exist_ok=True)
             
-            # 为每个会话创建子目录
             work_dir = base_work_dir / safe_session_id
             work_dir.mkdir(parents=True, exist_ok=True)
             
@@ -238,6 +239,8 @@ class CodeInterpreterPlugin(Star):
                 max_output_length=self.max_output_length,
                 allowed_libraries=self.allowed_libraries,
                 work_dir=str(work_dir),
+                module_json_path=str(self.module_json_path),
+                auto_install_libraries=self.auto_install_libraries,
             )
         return self._executors[safe_session_id]
 
@@ -464,9 +467,9 @@ class CodeInterpreterPlugin(Star):
             output_text = formatted_data.get("json_data") or formatted_data.get("raw_output", "执行成功（无输出）")
             
             if self.show_execution_time:
-                response_text = f"✅ 执行成功 ({result.execution_time:.2f}s)\n\n{output_text}"
+                response_text = f"执行成功!  用了这么长的时间({result.execution_time:.2f}s)\n\n{output_text}"
             else:
-                response_text = f"✅ 执行成功\n\n{output_text}"
+                response_text = f"执行成功\n\n{output_text}"
         else:
             response_text = f"❌ 执行失败\n\n{result.stderr}"
         
@@ -534,10 +537,14 @@ class CodeInterpreterPlugin(Star):
 • 直接执行Python代码
 • 通过LLM对话自动生成并执行代码
 • 支持数据可视化（图片、表格、JSON）
+• 自动库管理（自动检测并安装缺失依赖）
 
 指令：
 • /code <代码> - 直接执行Python代码
 • /code_help - 显示此帮助信息
+• /lib_status [库名] - 查看库安装状态
+• /lib_refresh - 刷新库状态缓存
+• /pip_mirror [镜像名] - 查看或切换pip镜像源
 
 可用库：
 • numpy - 数值计算
@@ -554,6 +561,85 @@ class CodeInterpreterPlugin(Star):
 直接向机器人发送需要计算或处理的问题，LLM会自动判断是否需要生成代码。"""
         
         yield event.plain_result(help_text)
+
+    @filter.command("lib_status")
+    async def lib_status(self, event: AstrMessageEvent, library_name: str = None):
+        """查看库安装状态。"""
+        if library_name:
+            status = self.library_manager.getLibraryStatus(library_name)
+            status_text = f"📦 库状态: {status['name']}\n"
+            status_text += f"类型: {status['type']}\n"
+            status_text += f"已安装: {'✅ 是' if status['installed'] else '❌ 否'}\n"
+            if status.get('version'):
+                status_text += f"版本: {status['version']}\n"
+            if status.get('installTime'):
+                status_text += f"安装时间: {status['installTime']}\n"
+            status_text += f"描述: {status.get('description', '无')}"
+            yield event.plain_result(status_text)
+        else:
+            installed_libs = self.library_manager.getInstalledLibraries()
+            all_libs = list(self.library_manager.config.libraries.keys())
+            
+            status_text = "📦 库管理状态\n\n"
+            status_text += "✅ 已安装的库:\n"
+            for lib in all_libs:
+                info = self.library_manager.config.libraries.get(lib)
+                if info and info.installed:
+                    version_str = f" (v{info.version})" if info.version else ""
+                    status_text += f"  • {lib}{version_str}\n"
+            
+            status_text += "\n❌ 未安装的库:\n"
+            for lib in all_libs:
+                info = self.library_manager.config.libraries.get(lib)
+                if info and not info.installed:
+                    status_text += f"  • {lib}\n"
+            
+            status_text += f"\n📚 标准库: {len(self.library_manager.STANDARD_LIBRARIES)} 个"
+            yield event.plain_result(status_text)
+
+    @filter.command("lib_refresh")
+    async def lib_refresh(self, event: AstrMessageEvent):
+        """刷新库状态缓存。"""
+        updated = self.library_manager.refreshLibraryStatus()
+        if updated:
+            status_text = "🔄 库状态已刷新\n\n更新的库:\n"
+            for lib, info in updated.items():
+                status_text += f"  • {lib}: {'已安装' if info['installed'] else '未安装'}\n"
+        else:
+            status_text = "✅ 库状态已刷新，无变化"
+        yield event.plain_result(status_text)
+
+    @filter.command("pip_mirror")
+    async def pip_mirror(self, event: AstrMessageEvent, mirror_name: str = None):
+        """查看或切换pip镜像源。"""
+        mirrors = self.library_manager.getAvailableMirrors()
+        
+        if mirror_name:
+            mirror_name = mirror_name.strip()
+            found = None
+            for name, url in mirrors:
+                if name == mirror_name or url == mirror_name:
+                    found = (name, url)
+                    break
+            
+            if found:
+                self.library_manager.setPipMirror(found[1])
+                status_text = f"✅ 已切换pip镜像源\n\n当前镜像: {found[0]}\n地址: {found[1]}"
+            else:
+                status_text = f"❌ 未找到镜像源: {mirror_name}\n\n可用镜像源:\n"
+                for name, url in mirrors:
+                    status_text += f"  • {name}: {url}\n"
+        else:
+            current_mirror = self.library_manager.pipMirror
+            status_text = "📡 pip镜像源管理\n\n"
+            status_text += f"当前镜像: {current_mirror}\n\n"
+            status_text += "可用镜像源:\n"
+            for name, url in mirrors:
+                marker = " ✅" if url == current_mirror else ""
+                status_text += f"  • {name}: {url}{marker}\n"
+            status_text += "\n使用方法: /pip_mirror <镜像名称或地址>"
+        
+        yield event.plain_result(status_text)
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req):
@@ -630,6 +716,10 @@ class CodeInterpreterPlugin(Star):
                 event, executor, code
             )
             
+            if result.installed_libraries:
+                install_msg = f"📦 正在安装缺失的库: {', '.join(result.installed_libraries)}"
+                await event.send(event.plain_result(install_msg))
+            
             logger.info(f"[CodeInterpreter] 执行完成: success={result.success}, time={result.execution_time:.2f}s, retries={retry_count}")
             if result.generated_images:
                 logger.info(f"[CodeInterpreter] 生成图片: {result.generated_images}")
@@ -664,11 +754,7 @@ class CodeInterpreterPlugin(Star):
             if result.success:
                 output_text = formatted_data.get("json_data") or formatted_data.get("raw_output", "")
                 if output_text:
-                    if self.show_execution_time:
-                        message_chain.append(Plain(f"\n✅ 执行成功 ({result.execution_time:.2f}s)\n\n{output_text}"))
-                    else:
-                        message_chain.append(Plain(f"\n✅ 执行成功\n\n{output_text}"))
-                # 如果有重试，显示重试次数
+                    message_chain.append(Plain(f"\n{output_text}"))
                 if retry_count > 0:
                     message_chain.append(Plain(f"\n🔄 自动修正 {retry_count} 次后成功"))
             else:
