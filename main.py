@@ -436,6 +436,320 @@ class CodeInterpreterPlugin(Star):
             logger.error(f"[CodeInterpreter] 网络搜索失败: {e}")
             yield event.plain_result(f"❌ 网络搜索失败: {str(e)}")
 
+    def _validate_file_path(self, file_path: str, session_id: str = None) -> tuple:
+        """
+        验证文件路径是否安全，返回 (是否有效, 错误信息, 绝对路径)
+        只允许读取工作目录下的文件
+        """
+        try:
+            path = Path(file_path)
+            
+            if not path.is_absolute():
+                if session_id:
+                    safe_session_id = session_id.replace(":", "_").replace("/", "_").replace("\\", "_")
+                    base_dir = Path(self.work_dir) / safe_session_id
+                else:
+                    base_dir = Path(self.work_dir)
+                path = base_dir / file_path
+            
+            path = path.resolve()
+            
+            work_path = Path(self.work_dir).resolve()
+            
+            try:
+                path.relative_to(work_path)
+            except ValueError:
+                return False, f"只能读取工作目录({self.work_dir})下的文件", None
+            
+            if not path.exists():
+                return False, f"文件不存在: {path}", None
+            
+            if not path.is_file():
+                return False, f"不是有效的文件: {path}", None
+            
+            dangerous_extensions = {'.exe', '.bat', '.cmd', '.com', '.scr', '.pif', '.vbs', '.js', '.jar'}
+            if path.suffix.lower() in dangerous_extensions:
+                return False, f"不允许读取可执行文件: {path.suffix}", None
+            
+            max_file_size = self.config.get("max_file_read_size", 1024 * 1024)
+            if path.stat().st_size > max_file_size:
+                size_mb = path.stat().st_size / (1024 * 1024)
+                return False, f"文件过大({size_mb:.2f}MB)，超过限制(1MB)", None
+            
+            return True, None, str(path)
+            
+        except Exception as e:
+            return False, f"路径验证失败: {str(e)}", None
+
+    def _detect_file_encoding(self, file_path: str) -> str:
+        """检测文件编码"""
+        try:
+            import chardet
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(10000)
+                result = chardet.detect(raw_data)
+                return result.get('encoding', 'utf-8')
+        except ImportError:
+            return 'utf-8'
+        except Exception:
+            return 'utf-8'
+
+    @filter.llm_tool(name="read_file")
+    async def read_file_tool(self, event: AstrMessageEvent, file_path: str) -> MessageEventResult:
+        """读取工作目录下的文件内容。
+        
+        当需要查看已生成的文件、数据文件或代码文件时使用此工具。
+        只能读取工作目录下的文件，不能读取系统文件。
+        
+        Args:
+            file_path(string): 要读取的文件路径（相对路径或绝对路径）
+        """
+        session_id = event.unified_msg_origin
+        logger.info(f"[CodeInterpreter] 读取文件: {file_path}")
+        
+        is_valid, error_msg, abs_path = self._validate_file_path(file_path, session_id)
+        
+        if not is_valid:
+            yield event.plain_result(f"❌ {error_msg}")
+            return
+        
+        try:
+            encoding = self._detect_file_encoding(abs_path)
+            
+            binary_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', 
+                                '.pdf', '.zip', '.tar', '.gz', '.rar', '.7z',
+                                '.mp3', '.mp4', '.avi', '.mov', '.wav'}
+            
+            path = Path(abs_path)
+            if path.suffix.lower() in binary_extensions:
+                yield event.plain_result(f"📁 二进制文件: {path.name}\n\n这是一个二进制文件，无法以文本形式显示。")
+                return
+            
+            with open(abs_path, 'r', encoding=encoding, errors='replace') as f:
+                content = f.read()
+            
+            max_display_length = 8000
+            if len(content) > max_display_length:
+                content = content[:max_display_length] + f"\n\n... (文件过长，已截断，总长度: {len(content)} 字符)"
+            
+            file_info = f"📄 文件: {path.name}\n"
+            file_info += f"📍 路径: {abs_path}\n"
+            file_info += f"📝 编码: {encoding}\n"
+            file_info += f"📊 大小: {path.stat().st_size} 字节\n\n"
+            file_info += f"--- 文件内容 ---\n\n{content}"
+            
+            yield event.plain_result(file_info)
+            
+        except UnicodeDecodeError:
+            yield event.plain_result(f"❌ 无法解码文件: {abs_path}\n\n这可能是一个二进制文件，请使用 Python 代码来处理它。")
+        except Exception as e:
+            logger.error(f"[CodeInterpreter] 读取文件失败: {e}")
+            yield event.plain_result(f"❌ 读取文件失败: {str(e)}")
+
+    @filter.llm_tool(name="list_files")
+    async def list_files_tool(self, event: AstrMessageEvent, directory: str = "") -> MessageEventResult:
+        """列出工作目录下的文件和文件夹。
+        
+        当需要查看工作目录中有哪些文件时使用此工具。
+        
+        Args:
+            directory(string): 要列出的目录路径（相对于工作目录，留空则列出根目录）
+        """
+        session_id = event.unified_msg_origin
+        logger.info(f"[CodeInterpreter] 列出文件: {directory}")
+        
+        try:
+            if directory:
+                safe_session_id = session_id.replace(":", "_").replace("/", "_").replace("\\", "_")
+                target_dir = Path(self.work_dir) / safe_session_id / directory
+            else:
+                safe_session_id = session_id.replace(":", "_").replace("/", "_").replace("\\", "_")
+                session_dir = Path(self.work_dir) / safe_session_id
+                if session_dir.exists():
+                    target_dir = session_dir
+                else:
+                    target_dir = Path(self.work_dir)
+            
+            target_dir = target_dir.resolve()
+            work_path = Path(self.work_dir).resolve()
+            
+            try:
+                target_dir.relative_to(work_path)
+            except ValueError:
+                yield event.plain_result(f"❌ 只能访问工作目录({self.work_dir})下的文件")
+                return
+            
+            if not target_dir.exists():
+                yield event.plain_result(f"❌ 目录不存在: {target_dir}")
+                return
+            
+            if not target_dir.is_dir():
+                yield event.plain_result(f"❌ 不是有效的目录: {target_dir}")
+                return
+            
+            items = list(target_dir.iterdir())
+            items.sort(key=lambda x: (not x.is_dir(), x.name.lower()))
+            
+            result = f"📁 目录列表: {target_dir.relative_to(work_path) if target_dir != work_path else '/'}\n\n"
+            
+            dirs = [item for item in items if item.is_dir()]
+            files = [item for item in items if item.is_file()]
+            
+            if dirs:
+                result += "📂 文件夹:\n"
+                for d in dirs:
+                    result += f"  📁 {d.name}/\n"
+                result += "\n"
+            
+            if files:
+                result += "📄 文件:\n"
+                for f in files:
+                    size = f.stat().st_size
+                    if size < 1024:
+                        size_str = f"{size}B"
+                    elif size < 1024 * 1024:
+                        size_str = f"{size/1024:.1f}KB"
+                    else:
+                        size_str = f"{size/(1024*1024):.1f}MB"
+                    result += f"  📄 {f.name} ({size_str})\n"
+            
+            if not items:
+                result += "空目录\n"
+            
+            result += f"\n📊 共 {len(dirs)} 个文件夹，{len(files)} 个文件"
+            
+            yield event.plain_result(result)
+            
+        except Exception as e:
+            logger.error(f"[CodeInterpreter] 列出文件失败: {e}")
+            yield event.plain_result(f"❌ 列出文件失败: {str(e)}")
+
+    @filter.command("read_file")
+    async def read_file_command(self, event: AstrMessageEvent, file_path: str):
+        """读取工作目录下的文件内容。
+        
+        用法: /read_file <文件路径>
+        示例: /read_file data.txt
+        """
+        session_id = event.unified_msg_origin
+        logger.info(f"[CodeInterpreter] 命令读取文件: {file_path}")
+        
+        is_valid, error_msg, abs_path = self._validate_file_path(file_path, session_id)
+        
+        if not is_valid:
+            yield event.plain_result(f"❌ {error_msg}")
+            return
+        
+        try:
+            encoding = self._detect_file_encoding(abs_path)
+            path = Path(abs_path)
+            
+            binary_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico',
+                                '.pdf', '.zip', '.tar', '.gz', '.rar', '.7z',
+                                '.mp3', '.mp4', '.avi', '.mov', '.wav'}
+            
+            if path.suffix.lower() in binary_extensions:
+                yield event.plain_result(f"📁 二进制文件: {path.name}\n\n这是一个二进制文件，无法以文本形式显示。")
+                return
+            
+            with open(abs_path, 'r', encoding=encoding, errors='replace') as f:
+                content = f.read()
+            
+            max_display_length = 8000
+            if len(content) > max_display_length:
+                content = content[:max_display_length] + f"\n\n... (文件过长，已截断，总长度: {len(content)} 字符)"
+            
+            file_info = f"📄 文件: {path.name}\n"
+            file_info += f"📍 路径: {abs_path}\n"
+            file_info += f"📝 编码: {encoding}\n"
+            file_info += f"📊 大小: {path.stat().st_size} 字节\n\n"
+            file_info += f"--- 文件内容 ---\n\n{content}"
+            
+            yield event.plain_result(file_info)
+            
+        except UnicodeDecodeError:
+            yield event.plain_result(f"❌ 无法解码文件: {abs_path}\n\n这可能是一个二进制文件。")
+        except Exception as e:
+            logger.error(f"[CodeInterpreter] 读取文件失败: {e}")
+            yield event.plain_result(f"❌ 读取文件失败: {str(e)}")
+
+    @filter.command("list_files")
+    async def list_files_command(self, event: AstrMessageEvent, directory: str = ""):
+        """列出工作目录下的文件和文件夹。
+        
+        用法: /list_files [目录路径]
+        示例: /list_files
+        示例: /list_files subdir
+        """
+        session_id = event.unified_msg_origin
+        logger.info(f"[CodeInterpreter] 命令列出文件: {directory}")
+        
+        try:
+            safe_session_id = session_id.replace(":", "_").replace("/", "_").replace("\\", "_")
+            
+            if directory:
+                target_dir = Path(self.work_dir) / safe_session_id / directory
+            else:
+                session_dir = Path(self.work_dir) / safe_session_id
+                if session_dir.exists():
+                    target_dir = session_dir
+                else:
+                    target_dir = Path(self.work_dir)
+            
+            target_dir = target_dir.resolve()
+            work_path = Path(self.work_dir).resolve()
+            
+            try:
+                target_dir.relative_to(work_path)
+            except ValueError:
+                yield event.plain_result(f"❌ 只能访问工作目录({self.work_dir})下的文件")
+                return
+            
+            if not target_dir.exists():
+                yield event.plain_result(f"❌ 目录不存在: {target_dir}")
+                return
+            
+            if not target_dir.is_dir():
+                yield event.plain_result(f"❌ 不是有效的目录: {target_dir}")
+                return
+            
+            items = list(target_dir.iterdir())
+            items.sort(key=lambda x: (not x.is_dir(), x.name.lower()))
+            
+            result = f"📁 目录列表: {target_dir.relative_to(work_path) if target_dir != work_path else '/'}\n\n"
+            
+            dirs = [item for item in items if item.is_dir()]
+            files = [item for item in items if item.is_file()]
+            
+            if dirs:
+                result += "📂 文件夹:\n"
+                for d in dirs:
+                    result += f"  📁 {d.name}/\n"
+                result += "\n"
+            
+            if files:
+                result += "📄 文件:\n"
+                for f in files:
+                    size = f.stat().st_size
+                    if size < 1024:
+                        size_str = f"{size}B"
+                    elif size < 1024 * 1024:
+                        size_str = f"{size/1024:.1f}KB"
+                    else:
+                        size_str = f"{size/(1024*1024):.1f}MB"
+                    result += f"  📄 {f.name} ({size_str})\n"
+            
+            if not items:
+                result += "空目录\n"
+            
+            result += f"\n📊 共 {len(dirs)} 个文件夹，{len(files)} 个文件"
+            
+            yield event.plain_result(result)
+            
+        except Exception as e:
+            logger.error(f"[CodeInterpreter] 列出文件失败: {e}")
+            yield event.plain_result(f"❌ 列出文件失败: {str(e)}")
+
     @filter.llm_tool(name="execute_python_code")
     async def execute_python_code(self, event: AstrMessageEvent, code: str) -> MessageEventResult:
         """执行Python代码并返回结果。
@@ -538,6 +852,7 @@ class CodeInterpreterPlugin(Star):
 • 通过LLM对话自动生成并执行代码
 • 支持数据可视化（图片、表格、JSON）
 • 自动库管理（自动检测并安装缺失依赖）
+• 文件管理（读取、列出工作目录文件）
 
 指令：
 • /code <代码> - 直接执行Python代码
@@ -545,6 +860,8 @@ class CodeInterpreterPlugin(Star):
 • /lib_status [库名] - 查看库安装状态
 • /lib_refresh - 刷新库状态缓存
 • /pip_mirror [镜像名] - 查看或切换pip镜像源
+• /read_file <文件路径> - 读取工作目录下的文件
+• /list_files [目录] - 列出工作目录下的文件
 
 可用库：
 • numpy - 数值计算
@@ -556,6 +873,8 @@ class CodeInterpreterPlugin(Star):
 示例：
 /code print(sum(range(1, 101)))
 /code import matplotlib.pyplot as plt; plt.plot([1,2,3]); plt.savefig('test.png'); print('图表已保存')
+/read_file data.txt
+/list_files
 
 提示：
 直接向机器人发送需要计算或处理的问题，LLM会自动判断是否需要生成代码。"""
